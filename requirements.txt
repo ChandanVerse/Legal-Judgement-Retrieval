@@ -1,0 +1,17 @@
+# Legal RAG System Dependencies
+# Core libraries for document processing and embeddings
+pymupdf
+langchain
+langchain-community
+langchain-text-splitters
+chromadb
+sentence-transformers
+transformers
+torch
+
+# Data manipulation and utilities
+pandas
+numpy
+
+# Additional dependencies for ChromaDB
+pydantic
