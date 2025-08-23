@@ -3,7 +3,11 @@ PDF ingestion module for Legal Judgments Similarity Retrieval System.
 Handles loading PDF files from the data directory and extracting text content using PyMuPDF.
 """
 
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    raise ImportError("PyMuPDF (fitz) is required. Install with: pip install pymupdf")
+
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 import config
@@ -23,7 +27,7 @@ class DocumentIngestion:
         self.data_dir = config.DATA_DIR
         self.supported_formats = config.SUPPORTED_FORMATS
     
-    def _extract_page_text(self, page) -> str:
+    def _extract_page_text(self, page: Any) -> str:
         """
         Extract text from a single PDF page with version compatibility.
         
@@ -39,7 +43,7 @@ class DocumentIngestion:
                 return page.get_text()
             # Fallback to legacy method
             elif hasattr(page, 'getText'):
-                return page.getText()
+                return page.getText()  # type: ignore
             # Final fallback
             else:
                 logger.warning("No text extraction method found for PyMuPDF page")
@@ -62,8 +66,28 @@ class DocumentIngestion:
             Exception: If PDF cannot be processed
         """
         try:
-            # Open PDF document
-            doc = fitz.open(pdf_path)
+            # Open PDF document - using type: ignore to handle PyMuPDF type issues
+            doc = fitz.open(str(pdf_path))  # type: ignore
+            text_content = ""
+            
+            # Extract text from each page
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                page_text = self._extract_page_text(page)
+                text_content += page_text + "\n"
+            
+            # Close document to free memory
+            doc.close()
+            
+            # Clean up the extracted text
+            text_content = self._clean_text(text_content)
+            
+            logger.debug(f"Extracted {len(text_content)} characters from {pdf_path.name}")
+            return text_content
+            
+        except Exception as e:
+            logger.error(f"Failed to extract text from {pdf_path}: {str(e)}")
+            raise Exception(f"PDF processing error: {str(e)}")pdf_path)
             text_content = ""
             
             # Extract text from each page
