@@ -3,13 +3,16 @@ PDF ingestion module for Legal Judgments Similarity Retrieval System.
 Handles loading PDF files from the data directory and extracting text content using PyMuPDF.
 """
 
+# PyMuPDF import
 try:
     import fitz  # PyMuPDF
-except ImportError:
-    raise ImportError("PyMuPDF (fitz) is required. Install with: pip install pymupdf")
+except ImportError as e:
+    print("PyMuPDF not found. Please install with: pip install pymupdf")
+    raise ImportError("PyMuPDF is required for PDF processing") from e
 
 from pathlib import Path
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Any, Optional
+import re
 import config
 import utils
 
@@ -27,7 +30,7 @@ class DocumentIngestion:
         self.data_dir = config.DATA_DIR
         self.supported_formats = config.SUPPORTED_FORMATS
     
-    def _extract_page_text(self, page: Any) -> str:
+    def _extract_page_text(self, page) -> str:
         """
         Extract text from a single PDF page with version compatibility.
         
@@ -65,8 +68,9 @@ class DocumentIngestion:
         Raises:
             Exception: If PDF cannot be processed
         """
+        doc = None
         try:
-            # Open PDF document - using type: ignore to handle PyMuPDF type issues
+            # Open PDF document - convert Path to string for compatibility
             doc = fitz.open(str(pdf_path))  # type: ignore
             text_content = ""
             
@@ -75,29 +79,6 @@ class DocumentIngestion:
                 page = doc.load_page(page_num)
                 page_text = self._extract_page_text(page)
                 text_content += page_text + "\n"
-            
-            # Close document to free memory
-            doc.close()
-            
-            # Clean up the extracted text
-            text_content = self._clean_text(text_content)
-            
-            logger.debug(f"Extracted {len(text_content)} characters from {pdf_path.name}")
-            return text_content
-            
-        except Exception as e:
-            logger.error(f"Failed to extract text from {pdf_path}: {str(e)}")
-            raise Exception(f"PDF processing error: {str(e)}")pdf_path)
-            text_content = ""
-            
-            # Extract text from each page
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                page_text = self._extract_page_text(page)
-                text_content += page_text + "\n"
-            
-            # Close document to free memory
-            doc.close()
             
             # Clean up the extracted text
             text_content = self._clean_text(text_content)
@@ -108,6 +89,13 @@ class DocumentIngestion:
         except Exception as e:
             logger.error(f"Failed to extract text from {pdf_path}: {str(e)}")
             raise Exception(f"PDF processing error: {str(e)}")
+        finally:
+            # Always close document to free memory, even if an error occurred
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception as close_error:
+                    logger.warning(f"Error closing PDF document: {str(close_error)}")
     
     def _clean_text(self, text: str) -> str:
         """
@@ -119,6 +107,9 @@ class DocumentIngestion:
         Returns:
             Cleaned text
         """
+        if not text:
+            return ""
+        
         # Remove excessive whitespace while preserving paragraph structure
         lines = text.split('\n')
         cleaned_lines = []
@@ -133,7 +124,6 @@ class DocumentIngestion:
         cleaned_text = '\n'.join(cleaned_lines)
         
         # Replace multiple spaces with single space
-        import re
         cleaned_text = re.sub(r' +', ' ', cleaned_text)
         
         return cleaned_text
@@ -163,7 +153,7 @@ class DocumentIngestion:
             logger.warning(f"No PDF files found in {self.data_dir}")
             return []
         
-        documents = []
+        documents: List[Dict[str, Any]] = []
         successful_loads = 0
         
         logger.info(f"Starting to process {len(pdf_files)} PDF files...")
@@ -236,3 +226,25 @@ class DocumentIngestion:
         
         logger.info(f"Validated {len(valid_documents)} documents")
         return valid_documents
+    
+    def test_pymupdf_installation(self) -> bool:
+        """
+        Test if PyMuPDF is properly installed and working.
+        
+        Returns:
+            True if PyMuPDF is working, False otherwise
+        """
+        try:
+            # Test basic fitz functionality
+            version = getattr(fitz, 'VersionBind', 'Unknown')
+            logger.info(f"PyMuPDF version: {version}")
+            
+            # Test document creation (this will fail if PyMuPDF is not properly installed)
+            test_doc = fitz.open()  # type: ignore
+            test_doc.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"PyMuPDF test failed: {str(e)}")
+            return False

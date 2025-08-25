@@ -6,7 +6,7 @@ Provides logging, text formatting, and common helper functions used across modul
 import logging
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import config
 
 def setup_logging() -> logging.Logger:
@@ -38,7 +38,7 @@ def setup_logging() -> logging.Logger:
     
     return logger
 
-def format_preview(text: str, max_length: int = None) -> str:
+def format_preview(text: str, max_length: Optional[int] = None) -> str:
     """
     Format text for preview display by truncating and cleaning.
     

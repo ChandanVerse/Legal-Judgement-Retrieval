@@ -211,4 +211,54 @@ class LegalRAGSystem:
         if self.vector_db.collection_exists_and_populated():
             print("✅ Found existing vector database with processed documents")
             
-            # Ask user if they want to
+            # Ask user if they want to reprocess or use existing
+            response = input("Do you want to reprocess documents? (y/N): ").strip().lower()
+            
+            if response in ['y', 'yes']:
+                print("🔄 Reprocessing documents...")
+                # Delete existing collection and reprocess
+                self.vector_db.delete_collection()
+                
+                if not self.ingest_and_process_documents():
+                    print("❌ Failed to reprocess documents.")
+                    sys.exit(1)
+            else:
+                print("📚 Using existing processed documents")
+        else:
+            # No existing database, process documents
+            print("🆕 No existing database found. Processing documents...")
+            
+            if not self.ingest_and_process_documents():
+                print("❌ Failed to process documents.")
+                sys.exit(1)
+        
+        # Launch interactive search
+        print("\n🚀 Launching interactive search interface...")
+        print("   (Press Ctrl+C to exit at any time)")
+        
+        try:
+            self.run_interactive_search()
+        except KeyboardInterrupt:
+            print("\n\n👋 System interrupted. Goodbye!")
+            sys.exit(0)
+
+
+def main():
+    """Main entry point."""
+    try:
+        # Create and run the system
+        system = LegalRAGSystem()
+        system.run()
+        
+    except KeyboardInterrupt:
+        print("\n\n👋 System interrupted. Goodbye!")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Fatal error in main: {str(e)}")
+        print(f"❌ Fatal error: {str(e)}")
+        print("Please check the logs for detailed error information.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
