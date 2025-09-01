@@ -6,6 +6,7 @@ import torch
 import logging
 from typing import List, Dict, Any, Optional
 import re
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -18,45 +19,71 @@ class RAGSystem:
         self.tokenizer = None
         self.model = None
         self.generator = None
-        self._initialize_llm()
+        self.is_initialized = False
     
-    def _initialize_llm(self):
+    async def initialize(self):
+        """Initialize the language model for generation"""
+        try:
+            logger.info("Initializing RAG system...")
+            await self._initialize_llm()
+            self.is_initialized = True
+            logger.info("RAG system initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing RAG system: {e}")
+            logger.warning("RAG system will use fallback mode without LLM")
+            self.is_initialized = True  # Allow system to work with fallback
+    
+    async def _initialize_llm(self):
         """Initialize the language model for generation"""
         try:
             logger.info(f"Loading language model: {self.config.LLM_MODEL}")
             
-            # Use a lighter model for local deployment
-            model_name = "microsoft/DialoGPT-medium"  # Lighter alternative
+            # Run model loading in thread pool to avoid blocking
+            def load_model():
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(self.config.LLM_MODEL)
+                    
+                    # Add padding token if it doesn't exist
+                    if tokenizer.pad_token is None:
+                        tokenizer.pad_token = tokenizer.eos_token
+                    
+                    # Load model with appropriate settings for local deployment
+                    model = AutoModelForCausalLM.from_pretrained(
+                        self.config.LLM_MODEL,
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        device_map="auto" if torch.cuda.is_available() else None,
+                        low_cpu_mem_usage=True
+                    )
+                    
+                    # Create text generation pipeline
+                    generator = pipeline(
+                        "text-generation",
+                        model=model,
+                        tokenizer=tokenizer,
+                        device=0 if torch.cuda.is_available() else -1,
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+                    )
+                    
+                    return tokenizer, model, generator
+                    
+                except Exception as e:
+                    logger.error(f"Error in model loading thread: {e}")
+                    return None, None, None
             
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
-            # Add padding token if it doesn't exist
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-            # Load model with appropriate settings for local deployment
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                device_map="auto" if torch.cuda.is_available() else None,
-                low_cpu_mem_usage=True
+            # Run in executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            self.tokenizer, self.model, self.generator = await loop.run_in_executor(
+                None, load_model
             )
             
-            # Create text generation pipeline
-            self.generator = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=0 if torch.cuda.is_available() else -1,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-            )
-            
-            logger.info("Language model initialized successfully")
+            if self.generator:
+                logger.info("Language model initialized successfully")
+            else:
+                logger.warning("Failed to initialize language model, using fallback")
             
         except Exception as e:
             logger.error(f"Error initializing language model: {e}")
-            # Fallback to a simpler approach if model loading fails
-            logger.warning("Using fallback text generation")
             self.generator = None
     
     def _create_legal_prompt(self, query: str, contexts: List[Dict[str, Any]]) -> str:
@@ -69,23 +96,17 @@ class RAGSystem:
             section = ctx['metadata'].get('section', 'general')
             preview = ctx['preview']
             
-            context_text += f"\n**Source {i}** (from {filename}, {section} section):\n{preview}\n"
+            context_text += f"\nSource {i} (from {filename}, {section} section):\n{preview}\n"
         
         # Create the prompt
-        prompt = f"""You are a legal research assistant. Based on the provided legal documents, answer the following query with accurate legal reasoning.
+        prompt = f"""Legal Query: {query}
 
-**Query:** {query}
-
-**Relevant Legal Documents:**
+Relevant Legal Documents:
 {context_text}
 
-**Instructions:**
-- Provide a clear, well-reasoned answer based on the legal precedents shown above
-- Reference specific sources when making legal points
-- If the available information is insufficient, clearly state what additional information would be needed
-- Use proper legal terminology and structure your response logically
+Based on the above legal documents, provide a concise answer addressing the query. Reference specific sources when making legal points.
 
-**Answer:**"""
+Answer:"""
 
         return prompt
     
@@ -103,12 +124,14 @@ class RAGSystem:
             section = ctx['metadata'].get('section', 'general')
             similarity = ctx.get('similarity_score', 0)
             
-            response += f"**{i}. {filename}** (Similarity: {similarity:.2f})\n"
-            response += f"Section: {section.title()}\n"
-            response += f"Excerpt: {ctx['preview']}\n\n"
+            response += f"{i}. **{filename}** (Relevance: {similarity:.1%})\n"
+            response += f"   Section: {section.title()}\n"
+            response += f"   Excerpt: {ctx['preview'][:150]}...\n\n"
         
         response += "**Legal Analysis:**\n"
-        response += "The above precedents suggest relevant legal principles. For detailed legal advice, please consult with a qualified legal professional and review the full judgment texts."
+        response += "The above precedents contain relevant legal principles for your query. "
+        response += "For detailed legal advice, please consult with a qualified legal professional "
+        response += "and review the full judgment texts."
         
         return response
     
@@ -117,6 +140,9 @@ class RAGSystem:
         Main RAG query function
         """
         try:
+            if not self.is_initialized:
+                raise Exception("RAG system not initialized")
+            
             logger.info(f"Processing RAG query: {query[:100]}...")
             
             # Build filter dictionary
@@ -139,7 +165,7 @@ class RAGSystem:
             
             if not filtered_contexts:
                 logger.warning("No contexts above similarity threshold found")
-                # Use all contexts if none meet threshold
+                # Use top 3 contexts if none meet threshold
                 filtered_contexts = contexts[:3] if contexts else []
             
             # Generate response
@@ -159,7 +185,7 @@ class RAGSystem:
                     'filename': ctx['metadata'].get('filename', 'Unknown'),
                     'section': ctx['metadata'].get('section', 'general'),
                     'preview': ctx['preview'],
-                    'similarity_score': ctx.get('similarity_score', 0),
+                    'similarity_score': round(ctx.get('similarity_score', 0), 3),
                     'metadata': ctx['metadata']
                 }
                 sources.append(source)
@@ -185,27 +211,31 @@ class RAGSystem:
         try:
             prompt = self._create_legal_prompt(query, contexts)
             
-            # Generate response
-            response = self.generator(
-                prompt,
-                max_new_tokens=self.config.MAX_NEW_TOKENS,
-                temperature=self.config.TEMPERATURE,
-                do_sample=True,
-                pad_token_id=self.tokenizer.eos_token_id,
-                truncation=True
-            )
+            # Run generation in thread pool to avoid blocking
+            def generate():
+                try:
+                    response = self.generator(
+                        prompt,
+                        max_new_tokens=self.config.MAX_NEW_TOKENS,
+                        temperature=self.config.TEMPERATURE,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        truncation=True,
+                        return_full_text=False
+                    )
+                    return response[0]['generated_text']
+                except Exception as e:
+                    logger.error(f"Error in generation thread: {e}")
+                    return None
             
-            # Extract generated text
-            generated_text = response[0]['generated_text']
+            loop = asyncio.get_event_loop()
+            generated_text = await loop.run_in_executor(None, generate)
             
-            # Extract only the answer part (after "**Answer:**")
-            if "**Answer:**" in generated_text:
-                answer = generated_text.split("**Answer:**")[-1].strip()
-            else:
-                answer = generated_text[len(prompt):].strip()
+            if generated_text is None:
+                raise Exception("Generation failed")
             
             # Clean up the response
-            answer = self._clean_generated_text(answer)
+            answer = self._clean_generated_text(generated_text)
             
             return answer
             
@@ -215,16 +245,23 @@ class RAGSystem:
     
     def _clean_generated_text(self, text: str) -> str:
         """Clean and format generated text"""
+        if not text:
+            return "Unable to generate response."
+        
         # Remove repetitive patterns
-        text = re.sub(r'(.+?)\1{2,}', r'\1', text)
+        text = re.sub(r'(.{10,}?)\1{2,}', r'\1', text)
         
         # Remove incomplete sentences at the end
         sentences = text.split('. ')
-        if len(sentences) > 1 and not sentences[-1].strip().endswith(('.', '!', '?')):
+        if len(sentences) > 1 and sentences[-1] and not sentences[-1].strip().endswith(('.', '!', '?')):
             text = '. '.join(sentences[:-1]) + '.'
         
+        # Clean up common artifacts
+        text = re.sub(r'\n+', ' ', text)  # Replace newlines with spaces
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+        
         # Limit length
-        max_length = self.config.MAX_NEW_TOKENS * 4  # Approximate character limit
+        max_length = 1000  # Reasonable limit for responses
         if len(text) > max_length:
             text = text[:max_length].rsplit(' ', 1)[0] + '...'
         

@@ -28,16 +28,15 @@ class Config:
     # Vector Database Configuration
     COLLECTION_NAME = "legal_judgments"
     
-    # Language Model Configuration
-    LLM_MODEL = "microsoft/DialoGPT-medium"  # Using lighter model for local deployment
-    # Alternative: "mistralai/Mistral-7B-Instruct-v0.1" (requires more resources)
+    # Language Model Configuration - Using a lighter model for better local performance
+    LLM_MODEL = "microsoft/DialoGPT-medium"
     LLM_DEVICE = "cpu"
     MAX_NEW_TOKENS = 512
     TEMPERATURE = 0.7
     
     # RAG Configuration
     TOP_K_RETRIEVAL = 5
-    SIMILARITY_THRESHOLD = 0.7
+    SIMILARITY_THRESHOLD = 0.6  # Lowered for better recall
     
     # Legal Document Sections
     LEGAL_SECTIONS = ["facts", "grounds", "prayers", "judgment", "ratio", "obiter"]
