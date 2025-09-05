@@ -14,8 +14,9 @@ transformers
 torch
 tokenizers
 
-# Vector database
-chromadb
+# Vector database - FAISS
+faiss-cpu
+# For GPU support, use: faiss-gpu
 
 # ML and NLP utilities
 numpy

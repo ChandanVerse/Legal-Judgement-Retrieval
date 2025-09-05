@@ -15,7 +15,13 @@ class Config:
     # Directory Paths
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data" / "judgments"
-    CHROMA_STORE_PATH = BASE_DIR / "chroma_store"
+    FAISS_STORE_PATH = BASE_DIR / "faiss_store"  # Changed from CHROMA_STORE_PATH
+    
+    # For backward compatibility
+    @property
+    def CHROMA_STORE_PATH(self):
+        """Backward compatibility property"""
+        return self.FAISS_STORE_PATH
     
     # Embedding Model Configuration
     EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -26,7 +32,7 @@ class Config:
     CHUNK_OVERLAP = 200
     
     # Vector Database Configuration
-    COLLECTION_NAME = "legal_judgments"
+    COLLECTION_NAME = "legal_judgments"  # Not used in FAISS but kept for compatibility
     
     # Language Model Configuration - Using a lighter model for better local performance
     LLM_MODEL = "microsoft/DialoGPT-medium"
@@ -54,7 +60,7 @@ class Config:
     def setup_directories(cls):
         """Ensure all required directories exist"""
         cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        cls.CHROMA_STORE_PATH.mkdir(parents=True, exist_ok=True)
+        cls.FAISS_STORE_PATH.mkdir(parents=True, exist_ok=True)
         
     def __init__(self):
         """Initialize configuration and setup directories"""
@@ -67,7 +73,7 @@ class Config:
             "PORT": self.PORT,
             "DEBUG": self.DEBUG,
             "DATA_DIR": str(self.DATA_DIR),
-            "CHROMA_STORE_PATH": str(self.CHROMA_STORE_PATH),
+            "FAISS_STORE_PATH": str(self.FAISS_STORE_PATH),
             "EMBEDDING_MODEL": self.EMBEDDING_MODEL,
             "LLM_MODEL": self.LLM_MODEL,
             "CHUNK_SIZE": self.CHUNK_SIZE,

@@ -4,7 +4,8 @@ RAG (Retrieval-Augmented Generation) system for legal judgments
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+from dataclasses import dataclass
 import re
 import asyncio
 
@@ -13,12 +14,15 @@ logger = logging.getLogger(__name__)
 class RAGSystem:
     """RAG system combining retrieval and generation for legal queries"""
     
-    def __init__(self, config, vector_db):
+    def __init__(self, config: Any, vector_db: Any):
+        """Initialize RAG system with type checking"""
+        if not hasattr(config, 'LLM_MODEL'):
+            raise ValueError("Config must have LLM_MODEL attribute")
         self.config = config
         self.vector_db = vector_db
-        self.tokenizer = None
-        self.model = None
-        self.generator = None
+        self.tokenizer: Optional[AutoTokenizer] = None
+        self.model: Optional[AutoModelForCausalLM] = None
+        self.generator: Optional[Any] = None
         self.is_initialized = False
     
     async def initialize(self):
@@ -135,13 +139,23 @@ Answer:"""
         
         return response
     
-    async def query(self, query: str, filters: Optional[List[str]] = None, top_k: int = 5) -> Dict[str, Any]:
+    async def query(
+        self,
+        query: str,
+        filters: Optional[List[str]] = None,
+        top_k: int = 5
+    ) -> Dict[str, Any]:
         """
-        Main RAG query function
+        Main RAG query function with input validation
         """
+        if not query or not isinstance(query, str):
+            raise ValueError("Query must be a non-empty string")
+        
+        top_k = min(max(1, top_k), 100)  # Bound between 1 and 100
+
         try:
             if not self.is_initialized:
-                raise Exception("RAG system not initialized")
+                raise RuntimeError("RAG system not initialized")
             
             logger.info(f"Processing RAG query: {query[:100]}...")
             
@@ -207,37 +221,40 @@ Answer:"""
             }
     
     async def _generate_with_llm(self, query: str, contexts: List[Dict[str, Any]]) -> str:
-        """Generate answer using the language model"""
+        """Generate answer using the language model with improved error handling"""
+        if not self.generator or not self.tokenizer:
+            raise RuntimeError("LLM not properly initialized")
+            
         try:
             prompt = self._create_legal_prompt(query, contexts)
             
             # Run generation in thread pool to avoid blocking
             def generate():
                 try:
-                    response = self.generator(
-                        prompt,
-                        max_new_tokens=self.config.MAX_NEW_TOKENS,
-                        temperature=self.config.TEMPERATURE,
-                        do_sample=True,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                        truncation=True,
-                        return_full_text=False
-                    )
-                    return response[0]['generated_text']
+                    # Add timeout protection
+                    with torch.inference_mode():
+                        response = self.generator(
+                            prompt,
+                            max_new_tokens=min(self.config.MAX_NEW_TOKENS, 1000),  # Add safety limit
+                            temperature=min(max(0.1, self.config.TEMPERATURE), 1.0),  # Bound temperature
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            truncation=True,
+                            return_full_text=False,
+                            num_return_sequences=1
+                        )
+                    return response[0]['generated_text'] if response else None
                 except Exception as e:
                     logger.error(f"Error in generation thread: {e}")
                     return None
-            
+
             loop = asyncio.get_event_loop()
             generated_text = await loop.run_in_executor(None, generate)
             
             if generated_text is None:
                 raise Exception("Generation failed")
             
-            # Clean up the response
-            answer = self._clean_generated_text(generated_text)
-            
-            return answer
+            return self._clean_generated_text(generated_text)
             
         except Exception as e:
             logger.error(f"Error generating with LLM: {e}")
