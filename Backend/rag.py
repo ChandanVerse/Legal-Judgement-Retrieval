@@ -1,7 +1,8 @@
 """
 RAG (Retrieval-Augmented Generation) system for legal judgments
 """
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers.pipelines import pipeline
 import torch
 import logging
 from typing import List, Dict, Any, Optional, Union
@@ -15,16 +16,20 @@ class RAGSystem:
     """RAG system combining retrieval and generation for legal queries"""
     
     def __init__(self, config: Any, vector_db: Any):
-        """Initialize RAG system with type checking"""
-        if not hasattr(config, 'LLM_MODEL'):
-            raise ValueError("Config must have LLM_MODEL attribute")
+        """Initialize with better type validation"""
+        required_attrs = ['LLM_MODEL', 'MAX_NEW_TOKENS', 'TEMPERATURE', 'SIMILARITY_THRESHOLD']
+        missing = [attr for attr in required_attrs if not hasattr(config, attr)]
+        if missing:
+            raise ValueError(f"Config missing required attributes: {', '.join(missing)}")
+            
         self.config = config
         self.vector_db = vector_db
         self.tokenizer: Optional[AutoTokenizer] = None
         self.model: Optional[AutoModelForCausalLM] = None
         self.generator: Optional[Any] = None
         self.is_initialized = False
-    
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+
     async def initialize(self):
         """Initialize the language model for generation"""
         try:
@@ -220,44 +225,90 @@ Answer:"""
                 'total_sources': 0
             }
     
+    def _get_safe_token_id(self) -> int:
+        """Safely get a token ID with proper type checking"""
+        if not self.tokenizer:
+            return 0
+        
+        # Cast tokenizer to Any to avoid type checking issues with dynamic attributes
+        tokenizer: Any = self.tokenizer
+        
+        # Try different token IDs in order of preference
+        token_candidates = [
+            getattr(tokenizer, 'eos_token_id', None),
+            getattr(tokenizer, 'pad_token_id', None),
+            getattr(tokenizer, 'bos_token_id', None),
+        ]
+        
+        for token_id in token_candidates:
+            if token_id is not None:
+                return int(token_id)
+        
+        return 0  # Final fallback
+    
     async def _generate_with_llm(self, query: str, contexts: List[Dict[str, Any]]) -> str:
-        """Generate answer using the language model with improved error handling"""
+        """Generate with proper null checks"""
         if not self.generator or not self.tokenizer:
             raise RuntimeError("LLM not properly initialized")
             
         try:
             prompt = self._create_legal_prompt(query, contexts)
             
-            # Run generation in thread pool to avoid blocking
             def generate():
                 try:
-                    # Add timeout protection
-                    with torch.inference_mode():
-                        response = self.generator(
-                            prompt,
-                            max_new_tokens=min(self.config.MAX_NEW_TOKENS, 1000),  # Add safety limit
-                            temperature=min(max(0.1, self.config.TEMPERATURE), 1.0),  # Bound temperature
-                            do_sample=True,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                            truncation=True,
-                            return_full_text=False,
-                            num_return_sequences=1
-                        )
-                    return response[0]['generated_text'] if response else None
+                    with torch.inference_mode(), torch.cuda.amp.autocast(enabled=self._device=="cuda"):
+                        generation_config = {
+                            "max_new_tokens": min(self.config.MAX_NEW_TOKENS, 1000),
+                            "temperature": min(max(0.1, self.config.TEMPERATURE), 1.0),
+                            "do_sample": True,
+                            "truncation": True,
+                            "return_full_text": False,
+                            "num_return_sequences": 1,
+                            "pad_token_id": self._get_safe_token_id(),
+                            "repetition_penalty": 1.2,
+                            "no_repeat_ngram_size": 3,
+                        }
+                        
+                        # Handle potential CUDA OOM with proper null checks
+                        try:
+                            if not self.generator:
+                                raise RuntimeError("Generator not available")
+                                
+                            response = self.generator(prompt, **generation_config)
+                            if not response or not isinstance(response, list):
+                                raise ValueError("Invalid response format")
+                            if not response[0].get('generated_text'):
+                                raise ValueError("Empty response from generator")
+                            return response[0]['generated_text']
+                            
+                        except RuntimeError as e:
+                            if "out of memory" in str(e):
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()
+                                if not self.generator:
+                                    raise RuntimeError("Generator not available after OOM")
+                                logger.warning("CUDA OOM, attempting with reduced parameters")
+                                generation_config["max_new_tokens"] //= 2
+                                response = self.generator(prompt, **generation_config)
+                                if not response or not isinstance(response, list):
+                                    raise ValueError("Invalid response format after OOM recovery")
+                                return response[0].get('generated_text')
+                            raise
+                            
                 except Exception as e:
-                    logger.error(f"Error in generation thread: {e}")
+                    logger.error(f"Error in generation thread: {str(e)}")
                     return None
 
             loop = asyncio.get_event_loop()
             generated_text = await loop.run_in_executor(None, generate)
             
             if generated_text is None:
-                raise Exception("Generation failed")
+                raise RuntimeError("Text generation failed")
             
             return self._clean_generated_text(generated_text)
             
         except Exception as e:
-            logger.error(f"Error generating with LLM: {e}")
+            logger.error(f"Error generating with LLM: {str(e)}")
             raise
     
     def _clean_generated_text(self, text: str) -> str:

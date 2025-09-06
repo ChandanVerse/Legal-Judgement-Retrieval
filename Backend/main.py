@@ -3,7 +3,7 @@ Legal Judgement Retrieval & Reasoning System - Main FastAPI Server
 """
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -27,6 +27,14 @@ ingestor = None
 vector_db = None
 rag_system = None
 
+async def cleanup_temp_files(file_paths: List[str]):
+    """Clean up temporary files after processing"""
+    for path in file_paths:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception as e:
+            logger.error(f"Error cleaning up {path}: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan with proper async initialization"""
@@ -37,16 +45,19 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize configuration
         config = Config()
+        await asyncio.sleep(0)  # Yield control
         
-        # Initialize components
-        ingestor = JudgmentIngestor(config)
-        vector_db = VectorDatabase(config)
-        
-        # Initialize vector database (this will load the embedding model)
-        await vector_db.initialize()
-        
-        # Initialize RAG system
-        rag_system = RAGSystem(config, vector_db)
+        # Initialize components with timeouts
+        try:
+            async with asyncio.timeout(60):  # 60 second timeout
+                ingestor = JudgmentIngestor(config)
+                vector_db = VectorDatabase(config)
+                await vector_db.initialize()
+                rag_system = RAGSystem(config, vector_db)
+                await rag_system.initialize()
+        except asyncio.TimeoutError:
+            logger.error("System initialization timed out")
+            raise RuntimeError("System initialization timed out")
         
         logger.info("System initialized successfully!")
         
@@ -56,8 +67,15 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
+    # Shutdown cleanup
     logger.info("Shutting down Legal Judgement RAG System...")
+    try:
+        await asyncio.gather(
+            vector_db.clear_collection() if vector_db else asyncio.sleep(0),
+            # Add other cleanup tasks here
+        )
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 app = FastAPI(
     title="Legal Judgement RAG System",
@@ -141,10 +159,14 @@ async def health_check():
         }
 
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest_judgments(files: List[UploadFile] = File(...)):
+async def ingest_judgments(
+    files: List[UploadFile] = File(...),
+    background_tasks: BackgroundTasks
+):
     """
     Ingest new judgment PDFs into the system
     """
+    temp_files: List[str] = []
     try:
         check_system_ready()
         
@@ -157,16 +179,18 @@ async def ingest_judgments(files: List[UploadFile] = File(...)):
                 detail=f"Too many files. Maximum {config.MAX_FILES_PER_REQUEST} files per request."
             )
         
-        # Save uploaded files temporarily
-        temp_files = []
+        # Create data directory if it doesn't exist
+        data_dir = Path(config.DATA_DIR)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save and process files
         for file in files:
-            if not file.filename.endswith('.pdf'):
+            if not file.filename or not file.filename.lower().endswith('.pdf'):
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Only PDF files are supported. Got: {file.filename}"
                 )
             
-            # Check file size
             content = await file.read()
             if len(content) > config.MAX_FILE_SIZE:
                 raise HTTPException(
@@ -174,11 +198,21 @@ async def ingest_judgments(files: List[UploadFile] = File(...)):
                     detail=f"File {file.filename} too large. Maximum size: {config.MAX_FILE_SIZE // (1024*1024)}MB"
                 )
             
-            file_path = Path(config.DATA_DIR) / file.filename
-            with open(file_path, "wb") as buffer:
-                buffer.write(content)
-            temp_files.append(str(file_path))
-        
+            # Use secure filename
+            safe_filename = Path(file.filename).name
+            file_path = data_dir / safe_filename
+            
+            # Write file safely
+            try:
+                with open(file_path, "wb") as buffer:
+                    buffer.write(content)
+                temp_files.append(str(file_path))
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to save file {safe_filename}: {str(e)}"
+                )
+
         # Process files
         processed_files = []
         total_chunks = 0
@@ -210,6 +244,9 @@ async def ingest_judgments(files: List[UploadFile] = File(...)):
                 detail="No files could be processed successfully"
             )
         
+        # Schedule cleanup
+        background_tasks.add_task(cleanup_temp_files, temp_files)
+        
         return IngestResponse(
             message=f"Successfully processed {len(processed_files)} files",
             processed_files=processed_files,
@@ -217,8 +254,12 @@ async def ingest_judgments(files: List[UploadFile] = File(...)):
         )
         
     except HTTPException:
+        # Clean up on error
+        await cleanup_temp_files(temp_files)
         raise
     except Exception as e:
+        # Clean up on error
+        await cleanup_temp_files(temp_files)
         logger.error(f"Ingestion error: {e}")
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
