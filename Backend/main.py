@@ -118,7 +118,7 @@ def check_system_ready():
             detail="System not fully initialized. Please wait and try again."
         )
     
-    if not vector_db._model_initialized:
+    if not hasattr(vector_db, '_model_initialized') or not vector_db._model_initialized:
         raise HTTPException(
             status_code=503,
             detail="Embedding model not ready. Please wait for initialization to complete."
@@ -133,20 +133,23 @@ async def root():
 async def health_check():
     """Detailed health check"""
     try:
-        # Check system initialization
         if not all([config, vector_db]):
             return {
                 "status": "initializing",
                 "message": "System is still starting up"
             }
         
-        # Check if vector DB is accessible
-        collection_count = await vector_db.get_collection_count()
+        collection_count = 0
+        model_status = "loading"
+        
+        if vector_db is not None:
+            collection_count = await vector_db.get_collection_count()
+            model_status = "ready" if getattr(vector_db, '_model_initialized', False) else "loading"
         
         return {
             "status": "healthy",
             "vector_db": "connected",
-            "embedding_model": "ready" if vector_db._model_initialized else "loading",
+            "embedding_model": model_status,
             "total_documents": collection_count
         }
         
@@ -159,28 +162,28 @@ async def health_check():
         }
 
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest_judgments(
-    files: List[UploadFile] = File(...),
-    background_tasks: BackgroundTasks
-):
-    """
-    Ingest new judgment PDFs into the system
-    """
+async def ingest_judgments(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    """Ingest new judgment PDFs into the system"""
     temp_files: List[str] = []
     try:
         check_system_ready()
-        
+        if not config:
+            raise RuntimeError("System configuration not initialized")
+            
         logger.info(f"Starting ingestion of {len(files)} files")
         
+        max_files = getattr(config, 'MAX_FILES_PER_REQUEST', 5)
+        max_size = getattr(config, 'MAX_FILE_SIZE', 10 * 1024 * 1024)
+        data_dir = Path(getattr(config, 'DATA_DIR', './data'))
+        
         # Validate file size and count
-        if len(files) > config.MAX_FILES_PER_REQUEST:
+        if len(files) > max_files:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Too many files. Maximum {config.MAX_FILES_PER_REQUEST} files per request."
+                detail=f"Too many files. Maximum {max_files} files per request."
             )
         
         # Create data directory if it doesn't exist
-        data_dir = Path(config.DATA_DIR)
         data_dir.mkdir(parents=True, exist_ok=True)
         
         # Save and process files
@@ -192,10 +195,10 @@ async def ingest_judgments(
                 )
             
             content = await file.read()
-            if len(content) > config.MAX_FILE_SIZE:
+            if len(content) > max_size:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"File {file.filename} too large. Maximum size: {config.MAX_FILE_SIZE // (1024*1024)}MB"
+                    detail=f"File {file.filename} too large. Maximum size: {max_size // (1024*1024)}MB"
                 )
             
             # Use secure filename
@@ -363,7 +366,9 @@ async def get_stats():
     """Get system statistics"""
     try:
         check_system_ready()
-        
+        if not config or not vector_db:
+            raise RuntimeError("System not fully initialized")
+            
         total_docs = await vector_db.get_collection_count()
         documents = await vector_db.list_documents()
         
@@ -375,9 +380,9 @@ async def get_stats():
                 for section in doc.get('sections', [])
             )),
             "model_info": {
-                "embedding_model": config.EMBEDDING_MODEL,
-                "llm_model": config.LLM_MODEL,
-                "embedding_device": config.EMBEDDING_DEVICE
+                "embedding_model": getattr(config, 'EMBEDDING_MODEL', 'unknown'),
+                "llm_model": getattr(config, 'LLM_MODEL', 'unknown'),
+                "embedding_device": getattr(config, 'EMBEDDING_DEVICE', 'cpu')
             }
         }
         
@@ -393,14 +398,17 @@ async def get_stats():
 async def get_config():
     """Get current system configuration (safe subset)"""
     try:
+        if not config:
+            raise RuntimeError("System configuration not initialized")
+            
         safe_config = {
-            "chunk_size": config.CHUNK_SIZE,
-            "chunk_overlap": config.CHUNK_OVERLAP,
-            "top_k_retrieval": config.TOP_K_RETRIEVAL,
-            "similarity_threshold": config.SIMILARITY_THRESHOLD,
-            "legal_sections": config.LEGAL_SECTIONS,
-            "max_file_size_mb": config.MAX_FILE_SIZE // (1024 * 1024),
-            "max_files_per_request": config.MAX_FILES_PER_REQUEST
+            "chunk_size": getattr(config, 'CHUNK_SIZE', 1000),
+            "chunk_overlap": getattr(config, 'CHUNK_OVERLAP', 200),
+            "top_k_retrieval": getattr(config, 'TOP_K_RETRIEVAL', 5),
+            "similarity_threshold": getattr(config, 'SIMILARITY_THRESHOLD', 0.7),
+            "legal_sections": getattr(config, 'LEGAL_SECTIONS', []),
+            "max_file_size_mb": getattr(config, 'MAX_FILE_SIZE', 10*1024*1024) // (1024 * 1024),
+            "max_files_per_request": getattr(config, 'MAX_FILES_PER_REQUEST', 5)
         }
         return safe_config
     except Exception as e:
