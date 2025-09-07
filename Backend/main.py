@@ -111,14 +111,23 @@ class IngestResponse(BaseModel):
     total_chunks: int
 
 def check_system_ready():
-    """Check if all system components are initialized"""
-    if not all([config, ingestor, vector_db, rag_system]):
+    """Check if all system components are initialized with proper null checks"""
+    components = {
+        'config': config,
+        'ingestor': ingestor,
+        'vector_db': vector_db,
+        'rag_system': rag_system
+    }
+    
+    missing = [name for name, comp in components.items() if comp is None]
+    if missing:
         raise HTTPException(
-            status_code=503, 
-            detail="System not fully initialized. Please wait and try again."
+            status_code=503,
+            detail=f"System components not initialized: {', '.join(missing)}"
         )
     
-    if not hasattr(vector_db, '_model_initialized') or not vector_db._model_initialized:
+    # Verify embedding model is ready
+    if not isinstance(vector_db, VectorDatabase) or not getattr(vector_db, '_model_initialized', False):
         raise HTTPException(
             status_code=503,
             detail="Embedding model not ready. Please wait for initialization to complete."
@@ -163,13 +172,13 @@ async def health_check():
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_judgments(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
-    """Ingest new judgment PDFs into the system"""
+    """Ingest new judgment PDFs into the system with null checks"""
     temp_files: List[str] = []
     try:
         check_system_ready()
-        if not config:
-            raise RuntimeError("System configuration not initialized")
-            
+        assert ingestor is not None, "Ingestor not initialized"
+        assert vector_db is not None, "Vector DB not initialized"
+        
         logger.info(f"Starting ingestion of {len(files)} files")
         
         max_files = getattr(config, 'MAX_FILES_PER_REQUEST', 5)
@@ -222,15 +231,17 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
         
         for file_path in temp_files:
             try:
-                # Extract text and chunk
-                chunks = ingestor.process_pdf(file_path)
-                
+                # Extract text and chunk with null check
+                chunks = ingestor.process_pdf(file_path) if ingestor else None
                 if not chunks:
                     logger.warning(f"No content extracted from {file_path}")
                     continue
                 
-                # Generate embeddings and store
-                await vector_db.add_documents(chunks, {"filename": Path(file_path).name})
+                # Generate embeddings and store with null check
+                if vector_db:
+                    await vector_db.add_documents(chunks, {"filename": Path(file_path).name})
+                else:
+                    raise RuntimeError("Vector DB not available")
                 
                 processed_files.append(Path(file_path).name)
                 total_chunks += len(chunks)
@@ -268,11 +279,10 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
 
 @app.post("/query", response_model=QueryResponse)
 async def query_judgments(request: QueryRequest):
-    """
-    Query the judgment database using RAG
-    """
+    """Query with null checks"""
     try:
         check_system_ready()
+        assert rag_system is not None, "RAG system not initialized"
         
         logger.info(f"Processing query: {request.query[:100]}...")
         
@@ -306,11 +316,10 @@ async def query_judgments(request: QueryRequest):
 
 @app.get("/documents")
 async def list_documents():
-    """
-    List all ingested documents
-    """
+    """List documents with null check"""
     try:
         check_system_ready()
+        assert vector_db is not None, "Vector DB not initialized"
         
         documents = await vector_db.list_documents()
         return {"documents": documents}
@@ -323,11 +332,10 @@ async def list_documents():
 
 @app.delete("/documents/{filename}")
 async def delete_document(filename: str):
-    """
-    Delete a specific document from the database
-    """
+    """Delete document with null check"""
     try:
         check_system_ready()
+        assert vector_db is not None, "Vector DB not initialized"
         
         if not filename.strip():
             raise HTTPException(status_code=400, detail="Filename cannot be empty")
@@ -346,11 +354,10 @@ async def delete_document(filename: str):
 
 @app.post("/clear")
 async def clear_database():
-    """
-    Clear all documents from the database (use with caution)
-    """
+    """Clear database with null check"""
     try:
         check_system_ready()
+        assert vector_db is not None, "Vector DB not initialized"
         
         await vector_db.clear_collection()
         return {"message": "Database cleared successfully"}
@@ -363,11 +370,11 @@ async def clear_database():
 
 @app.get("/stats")
 async def get_stats():
-    """Get system statistics"""
+    """Get stats with proper null checks"""
     try:
         check_system_ready()
-        if not config or not vector_db:
-            raise RuntimeError("System not fully initialized")
+        if not isinstance(vector_db, VectorDatabase):
+            raise RuntimeError("Vector DB not properly initialized")
             
         total_docs = await vector_db.get_collection_count()
         documents = await vector_db.list_documents()

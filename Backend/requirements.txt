@@ -16,7 +16,7 @@ tokenizers
 
 # Vector database - FAISS
 faiss-cpu
-# For GPU support, use: faiss-gpu
+faiss-gpu
 
 # ML and NLP utilities
 numpy
