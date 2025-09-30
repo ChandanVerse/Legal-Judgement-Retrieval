@@ -14,9 +14,11 @@ transformers
 torch
 tokenizers
 
-# Vector database - FAISS
-faiss-cpu
-faiss-gpu
+# Vector database - Pinecone
+pinecone-client
+
+# Google Generative AI
+google-generativeai
 
 # ML and NLP utilities
 numpy

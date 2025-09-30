@@ -15,13 +15,11 @@ class Config:
     # Directory Paths
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data" / "judgments"
-    FAISS_STORE_PATH = BASE_DIR / "faiss_store"  # Changed from CHROMA_STORE_PATH
     
-    # For backward compatibility
-    @property
-    def CHROMA_STORE_PATH(self):
-        """Backward compatibility property"""
-        return self.FAISS_STORE_PATH
+    # Pinecone Configuration
+    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+    PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+    PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "legal-judgments")
     
     # Embedding Model Configuration
     EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -31,18 +29,13 @@ class Config:
     CHUNK_SIZE = 1000
     CHUNK_OVERLAP = 200
     
-    # Vector Database Configuration
-    COLLECTION_NAME = "legal_judgments"  # Not used in FAISS but kept for compatibility
-    
-    # Language Model Configuration - Using a lighter model for better local performance
-    LLM_MODEL = "microsoft/DialoGPT-medium"
-    LLM_DEVICE = "cpu"
-    MAX_NEW_TOKENS = 512
-    TEMPERATURE = 0.7
+    # Language Model Configuration
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    LLM_MODEL = "gemini-pro"
     
     # RAG Configuration
     TOP_K_RETRIEVAL = 5
-    SIMILARITY_THRESHOLD = 0.6  # Lowered for better recall
+    SIMILARITY_THRESHOLD = 0.6
     
     # Legal Document Sections
     LEGAL_SECTIONS = ["facts", "grounds", "prayers", "judgment", "ratio", "obiter"]
@@ -52,30 +45,10 @@ class Config:
     MAX_FILES_PER_REQUEST = 5
     
     @classmethod
-    def get_huggingface_cache_dir(cls):
-        """Get HuggingFace cache directory"""
-        return os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-    
-    @classmethod
     def setup_directories(cls):
         """Ensure all required directories exist"""
         cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        cls.FAISS_STORE_PATH.mkdir(parents=True, exist_ok=True)
         
     def __init__(self):
         """Initialize configuration and setup directories"""
         self.setup_directories()
-        
-    def to_dict(self):
-        """Convert config to dictionary for logging"""
-        return {
-            "HOST": self.HOST,
-            "PORT": self.PORT,
-            "DEBUG": self.DEBUG,
-            "DATA_DIR": str(self.DATA_DIR),
-            "FAISS_STORE_PATH": str(self.FAISS_STORE_PATH),
-            "EMBEDDING_MODEL": self.EMBEDDING_MODEL,
-            "LLM_MODEL": self.LLM_MODEL,
-            "CHUNK_SIZE": self.CHUNK_SIZE,
-            "TOP_K_RETRIEVAL": self.TOP_K_RETRIEVAL
-        }

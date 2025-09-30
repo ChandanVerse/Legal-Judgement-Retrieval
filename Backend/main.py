@@ -70,10 +70,8 @@ async def lifespan(app: FastAPI):
     # Shutdown cleanup
     logger.info("Shutting down Legal Judgement RAG System...")
     try:
-        await asyncio.gather(
-            vector_db.clear_collection() if vector_db else asyncio.sleep(0),
-            # Add other cleanup tasks here
-        )
+        if vector_db and hasattr(vector_db, 'clear_collection'):
+            await vector_db.clear_collection()
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
@@ -103,7 +101,6 @@ class QueryResponse(BaseModel):
     query: str
     answer: str
     sources: List[Dict[str, Any]]
-    total_results: int
 
 class IngestResponse(BaseModel):
     message: str
@@ -126,7 +123,6 @@ def check_system_ready():
             detail=f"System components not initialized: {', '.join(missing)}"
         )
     
-    # Verify embedding model is ready
     if not isinstance(vector_db, VectorDatabase) or not getattr(vector_db, '_model_initialized', False):
         raise HTTPException(
             status_code=503,
@@ -151,7 +147,7 @@ async def health_check():
         collection_count = 0
         model_status = "loading"
         
-        if vector_db is not None:
+        if vector_db is not None and hasattr(vector_db, 'get_collection_count'):
             collection_count = await vector_db.get_collection_count()
             model_status = "ready" if getattr(vector_db, '_model_initialized', False) else "loading"
         
@@ -185,17 +181,14 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
         max_size = getattr(config, 'MAX_FILE_SIZE', 10 * 1024 * 1024)
         data_dir = Path(getattr(config, 'DATA_DIR', './data'))
         
-        # Validate file size and count
         if len(files) > max_files:
             raise HTTPException(
                 status_code=400, 
                 detail=f"Too many files. Maximum {max_files} files per request."
             )
         
-        # Create data directory if it doesn't exist
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save and process files
         for file in files:
             if not file.filename or not file.filename.lower().endswith('.pdf'):
                 raise HTTPException(
@@ -210,11 +203,9 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
                     detail=f"File {file.filename} too large. Maximum size: {max_size // (1024*1024)}MB"
                 )
             
-            # Use secure filename
             safe_filename = Path(file.filename).name
             file_path = data_dir / safe_filename
             
-            # Write file safely
             try:
                 with open(file_path, "wb") as buffer:
                     buffer.write(content)
@@ -225,19 +216,16 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
                     detail=f"Failed to save file {safe_filename}: {str(e)}"
                 )
 
-        # Process files
         processed_files = []
         total_chunks = 0
         
         for file_path in temp_files:
             try:
-                # Extract text and chunk with null check
                 chunks = ingestor.process_pdf(file_path) if ingestor else None
                 if not chunks:
                     logger.warning(f"No content extracted from {file_path}")
                     continue
                 
-                # Generate embeddings and store with null check
                 if vector_db:
                     await vector_db.add_documents(chunks, {"filename": Path(file_path).name})
                 else:
@@ -258,7 +246,6 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
                 detail="No files could be processed successfully"
             )
         
-        # Schedule cleanup
         background_tasks.add_task(cleanup_temp_files, temp_files)
         
         return IngestResponse(
@@ -268,11 +255,9 @@ async def ingest_judgments(background_tasks: BackgroundTasks, files: List[Upload
         )
         
     except HTTPException:
-        # Clean up on error
         await cleanup_temp_files(temp_files)
         raise
     except Exception as e:
-        # Clean up on error
         await cleanup_temp_files(temp_files)
         logger.error(f"Ingestion error: {e}")
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
@@ -286,15 +271,12 @@ async def query_judgments(request: QueryRequest):
         
         logger.info(f"Processing query: {request.query[:100]}...")
         
-        # Validate query
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Validate top_k parameter
         if request.top_k and (request.top_k < 1 or request.top_k > 20):
             raise HTTPException(status_code=400, detail="top_k must be between 1 and 20")
         
-        # Perform RAG query
         result = await rag_system.query(
             query=request.query,
             filters=request.filters,
@@ -304,8 +286,7 @@ async def query_judgments(request: QueryRequest):
         return QueryResponse(
             query=request.query,
             answer=result["answer"],
-            sources=result["sources"],
-            total_results=len(result["sources"])
+            sources=result["sources"]
         )
         
     except HTTPException:
@@ -329,6 +310,25 @@ async def list_documents():
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
+
+@app.get("/documents/{document_id}")
+async def get_document(document_id: str):
+    """Get a single document by its ID"""
+    try:
+        check_system_ready()
+        assert vector_db is not None, "Vector DB not initialized"
+        
+        document = await vector_db.get_document_by_id(document_id)
+        if document:
+            return document
+        else:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
 
 @app.delete("/documents/{filename}")
 async def delete_document(filename: str):
@@ -367,60 +367,6 @@ async def clear_database():
     except Exception as e:
         logger.error(f"Error clearing database: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to clear database: {str(e)}")
-
-@app.get("/stats")
-async def get_stats():
-    """Get stats with proper null checks"""
-    try:
-        check_system_ready()
-        if not isinstance(vector_db, VectorDatabase):
-            raise RuntimeError("Vector DB not properly initialized")
-            
-        total_docs = await vector_db.get_collection_count()
-        documents = await vector_db.list_documents()
-        
-        stats = {
-            "total_chunks": total_docs,
-            "unique_documents": len(documents),
-            "sections_available": list(set(
-                section for doc in documents 
-                for section in doc.get('sections', [])
-            )),
-            "model_info": {
-                "embedding_model": getattr(config, 'EMBEDDING_MODEL', 'unknown'),
-                "llm_model": getattr(config, 'LLM_MODEL', 'unknown'),
-                "embedding_device": getattr(config, 'EMBEDDING_DEVICE', 'cpu')
-            }
-        }
-        
-        return stats
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
-
-@app.get("/config")
-async def get_config():
-    """Get current system configuration (safe subset)"""
-    try:
-        if not config:
-            raise RuntimeError("System configuration not initialized")
-            
-        safe_config = {
-            "chunk_size": getattr(config, 'CHUNK_SIZE', 1000),
-            "chunk_overlap": getattr(config, 'CHUNK_OVERLAP', 200),
-            "top_k_retrieval": getattr(config, 'TOP_K_RETRIEVAL', 5),
-            "similarity_threshold": getattr(config, 'SIMILARITY_THRESHOLD', 0.7),
-            "legal_sections": getattr(config, 'LEGAL_SECTIONS', []),
-            "max_file_size_mb": getattr(config, 'MAX_FILE_SIZE', 10*1024*1024) // (1024 * 1024),
-            "max_files_per_request": getattr(config, 'MAX_FILES_PER_REQUEST', 5)
-        }
-        return safe_config
-    except Exception as e:
-        logger.error(f"Error getting config: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get config: {str(e)}")
 
 if __name__ == "__main__":
     # Initialize config for running directly
