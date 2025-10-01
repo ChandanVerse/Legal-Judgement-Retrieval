@@ -1,0 +1,13 @@
+# PDF processing
+pdfplumber
+
+# Text processing
+langchain
+sentence-transformers
+torch
+
+# Vector database
+pinecone
+
+# Utilities
+python-dotenv
