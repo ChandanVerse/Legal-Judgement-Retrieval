@@ -1,381 +1,167 @@
 """
-Legal Judgement Retrieval & Reasoning System - Main FastAPI Server
+Vector database operations using Pinecone for legal judgments
 """
-import os
-import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+import pinecone
 import logging
-from pathlib import Path
-import asyncio
-from contextlib import asynccontextmanager
+from typing import List, Dict, Any, Optional
+from langchain.schema import Document
+import uuid
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
-from config import Config
-from ingestion import JudgmentIngestor
-from vectordb import VectorDatabase
-from rag import RAGSystem
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variables for system components
-config = None
-ingestor = None
-vector_db = None
-rag_system = None
-
-async def cleanup_temp_files(file_paths: List[str]):
-    """Clean up temporary files after processing"""
-    for path in file_paths:
+class VectorDatabase:
+    """Pinecone vector database for storing and retrieving legal judgment embeddings"""
+    
+    def __init__(self, config: Any):
+        self.config = config
+        self.index: Optional[pinecone.Index] = None
+        self.embedding_model: Optional[SentenceTransformer] = None
+        self._model_initialized = False
+        self.embedding_dim: Optional[int] = None
+    
+    async def initialize(self):
         try:
-            Path(path).unlink(missing_ok=True)
+            # Initialize embedding model first
+            await self._initialize_embedding_model()
+            
+            # Initialize Pinecone
+            pinecone.init(
+                api_key=self.config.PINECONE_API_KEY,
+                environment=self.config.PINECONE_ENVIRONMENT
+            )
+            
+            index_name = self.config.PINECONE_INDEX_NAME
+            if index_name not in pinecone.list_indexes():
+                pinecone.create_index(
+                    name=index_name,
+                    dimension=self.embedding_dim,
+                    metric="cosine"
+                )
+            
+            self.index = pinecone.Index(index_name)
+            logger.info("Pinecone vector database initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Error cleaning up {path}: {e}")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan with proper async initialization"""
-    global config, ingestor, vector_db, rag_system
+            logger.error(f"Error initializing vector database: {e}")
+            raise
     
-    # Startup
-    logger.info("Starting Legal Judgement RAG System...")
-    try:
-        # Initialize configuration
-        config = Config()
-        await asyncio.sleep(0)  # Yield control
-        
-        # Initialize components with timeouts
+    async def _initialize_embedding_model(self):
         try:
-            async with asyncio.timeout(60):  # 60 second timeout
-                ingestor = JudgmentIngestor(config)
-                vector_db = VectorDatabase(config)
-                await vector_db.initialize()
-                rag_system = RAGSystem(config, vector_db)
-                await rag_system.initialize()
-        except asyncio.TimeoutError:
-            logger.error("System initialization timed out")
-            raise RuntimeError("System initialization timed out")
-        
-        logger.info("System initialized successfully!")
-        
-    except Exception as e:
-        logger.error(f"Failed to initialize system: {e}")
-        raise
-    
-    yield
-    
-    # Shutdown cleanup
-    logger.info("Shutting down Legal Judgement RAG System...")
-    try:
-        if vector_db and hasattr(vector_db, 'clear_collection'):
-            await vector_db.clear_collection()
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
-
-app = FastAPI(
-    title="Legal Judgement RAG System",
-    description="Retrieve and reason about legal judgments using RAG",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# CORS middleware for frontend communication
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "*"],  # Vite dev server
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Request/Response Models
-class QueryRequest(BaseModel):
-    query: str
-    filters: Optional[List[str]] = None  # ['facts', 'grounds', 'prayers']
-    top_k: Optional[int] = 5
-
-class QueryResponse(BaseModel):
-    query: str
-    answer: str
-    sources: List[Dict[str, Any]]
-
-class IngestResponse(BaseModel):
-    message: str
-    processed_files: List[str]
-    total_chunks: int
-
-def check_system_ready():
-    """Check if all system components are initialized with proper null checks"""
-    components = {
-        'config': config,
-        'ingestor': ingestor,
-        'vector_db': vector_db,
-        'rag_system': rag_system
-    }
-    
-    missing = [name for name, comp in components.items() if comp is None]
-    if missing:
-        raise HTTPException(
-            status_code=503,
-            detail=f"System components not initialized: {', '.join(missing)}"
-        )
-    
-    if not isinstance(vector_db, VectorDatabase) or not getattr(vector_db, '_model_initialized', False):
-        raise HTTPException(
-            status_code=503,
-            detail="Embedding model not ready. Please wait for initialization to complete."
-        )
-
-@app.get("/")
-async def root():
-    """Health check endpoint"""
-    return {"message": "Legal Judgement RAG System is running!", "version": "1.0.0"}
-
-@app.get("/health")
-async def health_check():
-    """Detailed health check"""
-    try:
-        if not all([config, vector_db]):
-            return {
-                "status": "initializing",
-                "message": "System is still starting up"
-            }
-        
-        collection_count = 0
-        model_status = "loading"
-        
-        if vector_db is not None and hasattr(vector_db, 'get_collection_count'):
-            collection_count = await vector_db.get_collection_count()
-            model_status = "ready" if getattr(vector_db, '_model_initialized', False) else "loading"
-        
-        return {
-            "status": "healthy",
-            "vector_db": "connected",
-            "embedding_model": model_status,
-            "total_documents": collection_count
-        }
-        
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
-            "status": "unhealthy", 
-            "error": str(e),
-            "vector_db": "disconnected"
-        }
-
-@app.post("/ingest", response_model=IngestResponse)
-async def ingest_judgments(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
-    """Ingest new judgment PDFs into the system with null checks"""
-    temp_files: List[str] = []
-    try:
-        check_system_ready()
-        assert ingestor is not None, "Ingestor not initialized"
-        assert vector_db is not None, "Vector DB not initialized"
-        
-        logger.info(f"Starting ingestion of {len(files)} files")
-        
-        max_files = getattr(config, 'MAX_FILES_PER_REQUEST', 5)
-        max_size = getattr(config, 'MAX_FILE_SIZE', 10 * 1024 * 1024)
-        data_dir = Path(getattr(config, 'DATA_DIR', './data'))
-        
-        if len(files) > max_files:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Too many files. Maximum {max_files} files per request."
+            logger.info(f"Loading embedding model: {self.config.EMBEDDING_MODEL}")
+            self.embedding_model = SentenceTransformer(
+                self.config.EMBEDDING_MODEL,
+                device=self.config.EMBEDDING_DEVICE
             )
-        
-        data_dir.mkdir(parents=True, exist_ok=True)
-        
-        for file in files:
-            if not file.filename or not file.filename.lower().endswith('.pdf'):
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Only PDF files are supported. Got: {file.filename}"
-                )
             
-            content = await file.read()
-            if len(content) > max_size:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"File {file.filename} too large. Maximum size: {max_size // (1024*1024)}MB"
-                )
+            test_embedding = self.embedding_model.encode(["test"])
+            self.embedding_dim = test_embedding.shape[1]
+            self._model_initialized = True
+            logger.info(f"Embedding model loaded successfully. Dimension: {self.embedding_dim}")
             
-            safe_filename = Path(file.filename).name
-            file_path = data_dir / safe_filename
+        except Exception as e:
+            logger.error(f"Error loading embedding model: {e}")
+            raise
             
-            try:
-                with open(file_path, "wb") as buffer:
-                    buffer.write(content)
-                temp_files.append(str(file_path))
-            except OSError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to save file {safe_filename}: {str(e)}"
-                )
+    def _ensure_model_ready(self):
+        if not self._model_initialized or self.embedding_model is None:
+            raise RuntimeError("Embedding model not initialized. Call initialize() first.")
+            
+    def generate_embeddings(self, texts: List[str]) -> np.ndarray:
+        self._ensure_model_ready()
+        return self.embedding_model.encode(texts, convert_to_tensor=False, normalize_embeddings=True)
 
-        processed_files = []
-        total_chunks = 0
+    async def add_documents(self, documents: List[Document], file_metadata: Optional[Dict] = None):
+        if not documents:
+            return
+            
+        self._ensure_model_ready()
         
-        for file_path in temp_files:
-            try:
-                chunks = ingestor.process_pdf(file_path) if ingestor else None
-                if not chunks:
-                    logger.warning(f"No content extracted from {file_path}")
-                    continue
-                
-                if vector_db:
-                    await vector_db.add_documents(chunks, {"filename": Path(file_path).name})
-                else:
-                    raise RuntimeError("Vector DB not available")
-                
-                processed_files.append(Path(file_path).name)
-                total_chunks += len(chunks)
-                
-                logger.info(f"Processed {Path(file_path).name}: {len(chunks)} chunks")
-                
-            except Exception as e:
-                logger.error(f"Error processing {file_path}: {e}")
-                continue
+        texts = [doc.page_content for doc in documents]
+        embeddings = self.generate_embeddings(texts)
         
-        if not processed_files:
-            raise HTTPException(
-                status_code=400,
-                detail="No files could be processed successfully"
+        vectors_to_upsert = []
+        for i, doc in enumerate(documents):
+            doc_id = str(uuid.uuid4())
+            metadata = doc.metadata.copy()
+            if file_metadata:
+                metadata.update(file_metadata)
+            
+            metadata['content'] = doc.page_content
+            
+            vectors_to_upsert.append({
+                "id": doc_id,
+                "values": embeddings[i].tolist(),
+                "metadata": metadata
+            })
+            
+        if self.index:
+            self.index.upsert(vectors=vectors_to_upsert)
+            
+    async def similarity_search(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        self._ensure_model_ready()
+        query_embedding = self.generate_embeddings([query])[0].tolist()
+        
+        if self.index:
+            results = self.index.query(
+                vector=query_embedding,
+                top_k=top_k,
+                filter=filters,
+                include_metadata=True
             )
-        
-        background_tasks.add_task(cleanup_temp_files, temp_files)
-        
-        return IngestResponse(
-            message=f"Successfully processed {len(processed_files)} files",
-            processed_files=processed_files,
-            total_chunks=total_chunks
-        )
-        
-    except HTTPException:
-        await cleanup_temp_files(temp_files)
-        raise
-    except Exception as e:
-        await cleanup_temp_files(temp_files)
-        logger.error(f"Ingestion error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
-
-@app.post("/query", response_model=QueryResponse)
-async def query_judgments(request: QueryRequest):
-    """Query with null checks"""
-    try:
-        check_system_ready()
-        assert rag_system is not None, "RAG system not initialized"
-        
-        logger.info(f"Processing query: {request.query[:100]}...")
-        
-        if not request.query.strip():
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
-        if request.top_k and (request.top_k < 1 or request.top_k > 20):
-            raise HTTPException(status_code=400, detail="top_k must be between 1 and 20")
-        
-        result = await rag_system.query(
-            query=request.query,
-            filters=request.filters,
-            top_k=request.top_k or 5
-        )
-        
-        return QueryResponse(
-            query=request.query,
-            answer=result["answer"],
-            sources=result["sources"]
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Query error: {e}")
-        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
-
-@app.get("/documents")
-async def list_documents():
-    """List documents with null check"""
-    try:
-        check_system_ready()
-        assert vector_db is not None, "Vector DB not initialized"
-        
-        documents = await vector_db.list_documents()
-        return {"documents": documents}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing documents: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
-
-@app.get("/documents/{document_id}")
-async def get_document(document_id: str):
-    """Get a single document by its ID"""
-    try:
-        check_system_ready()
-        assert vector_db is not None, "Vector DB not initialized"
-        
-        document = await vector_db.get_document_by_id(document_id)
-        if document:
-            return document
-        else:
-            raise HTTPException(status_code=404, detail="Document not found")
             
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting document: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
+            formatted_results = []
+            for match in results['matches']:
+                content = match['metadata'].pop('content', '')
+                formatted_results.append({
+                    'id': match['id'],
+                    'content': content,
+                    'metadata': match['metadata'],
+                    'similarity_score': match['score']
+                })
+            return formatted_results
+        return []
 
-@app.delete("/documents/{filename}")
-async def delete_document(filename: str):
-    """Delete document with null check"""
-    try:
-        check_system_ready()
-        assert vector_db is not None, "Vector DB not initialized"
-        
-        if not filename.strip():
-            raise HTTPException(status_code=400, detail="Filename cannot be empty")
-        
-        success = await vector_db.delete_document(filename)
-        if success:
-            return {"message": f"Document {filename} deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail=f"Document {filename} not found")
+    async def get_document_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
+        if self.index:
+            response = self.index.fetch(ids=[document_id])
+            if response and response['vectors']:
+                vector_data = response['vectors'].get(document_id)
+                if vector_data:
+                    content = vector_data['metadata'].pop('content', '')
+                    return {
+                        'id': vector_data['id'],
+                        'content': content,
+                        'metadata': vector_data['metadata']
+                    }
+        return None
+
+    async def get_collection_count(self) -> int:
+        if self.index:
+            stats = self.index.describe_index_stats()
+            return stats.get('total_vector_count', 0)
+        return 0
+
+    async def clear_collection(self):
+        if self.index:
+            self.index.delete(delete_all=True)
+
+    async def delete_document(self, filename: str) -> bool:
+        if self.index:
+            # Pinecone requires fetching IDs to delete by metadata, which can be slow.
+            # A more robust solution might involve a separate metadata store.
+            # For this implementation, we'll assume a smaller scale where this is acceptable.
             
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting document: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+            # This is a placeholder for a more complex implementation.
+            # A proper implementation would require querying for all vectors with the filename
+            # and then deleting them by ID.
+            logger.warning("Deleting by filename is not efficiently supported by Pinecone in this implementation.")
+            return False 
+        return False
 
-@app.post("/clear")
-async def clear_database():
-    """Clear database with null check"""
-    try:
-        check_system_ready()
-        assert vector_db is not None, "Vector DB not initialized"
-        
-        await vector_db.clear_collection()
-        return {"message": "Database cleared successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error clearing database: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear database: {str(e)}")
-
-if __name__ == "__main__":
-    # Initialize config for running directly
-    config = Config()
-    
-    uvicorn.run(
-        "main:app",
-        host=config.HOST,
-        port=config.PORT,
-        reload=config.DEBUG,
-        log_level="info" if config.DEBUG else "warning"
-    )
+    async def list_documents(self) -> List[Dict[str, Any]]:
+        # This is also not directly supported by Pinecone without fetching all vectors.
+        # This is a placeholder.
+        logger.warning("Listing all documents is not efficiently supported by Pinecone in this implementation.")
+        return []
