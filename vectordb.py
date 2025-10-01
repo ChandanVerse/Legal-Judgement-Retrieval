@@ -35,7 +35,9 @@ class VectorDatabase:
         self.embedding_model = SentenceTransformer(
             self.config.EMBEDDING_MODEL,
             device=self.config.EMBEDDING_DEVICE,
-            backend="onnx"  # Use ONNX Runtime for optimized inference
+            backend="onnx",  # Use ONNX Runtime for optimized inference
+            trust_remote_code=True,
+            model_kwargs={"file_name": "onnx/model.onnx"}  # Specify the ONNX model file
         )
         
         # Get embedding dimension

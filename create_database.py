@@ -1,7 +1,13 @@
+# chandanverse/legal-judgement-retrieval/ChandanVerse-Legal-Judgement-Retrieval-5b87de6ee242f34fb3241ea10cc846ecb3989207/create_database.py
+
 """
 Flow 1: Create Vector Database from Judgments
 Run this script to process PDFs and create the vector database
 """
+# IMPORTANT: Load environment variables before importing other modules
+from dotenv import load_dotenv
+load_dotenv()
+
 from config import Config
 from ingestion import JudgmentIngestor
 from vectordb import VectorDatabase
