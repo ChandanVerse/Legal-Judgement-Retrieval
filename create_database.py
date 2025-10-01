@@ -1,10 +1,7 @@
-# chandanverse/legal-judgement-retrieval/ChandanVerse-Legal-Judgement-Retrieval-5b87de6ee242f34fb3241ea10cc846ecb3989207/create_database.py
-
 """
 Flow 1: Create Vector Database from Judgments
 Run this script to process PDFs and create the vector database
 """
-# IMPORTANT: Load environment variables before importing other modules
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -45,7 +42,7 @@ def main():
         return
     
     # Add to vector database
-    print("\nAdding documents to Pinecone...")
+    print("\nAdding documents to ChromaDB...")
     vector_db.add_documents(documents)
     
     # Show statistics
@@ -55,7 +52,8 @@ def main():
     stats = vector_db.get_stats()
     print(f"Total vectors in database: {stats['total_vectors']}")
     print(f"Embedding dimension: {stats['dimension']}")
-    print(f"Index name: {config.PINECONE_INDEX_NAME}")
+    print(f"Collection name: {stats['collection_name']}")
+    print(f"Database path: {config.CHROMA_DB_PATH}")
     print("="*60)
 
 if __name__ == "__main__":

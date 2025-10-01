@@ -35,9 +35,13 @@ class JudgmentIngestor:
     
     def preprocess_text(self, text: str) -> str:
         """Clean and preprocess text"""
+        # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text)
+        # Remove page numbers
         text = re.sub(r'Page \d+ of \d+', '', text, flags=re.IGNORECASE)
+        # Remove special characters but keep legal symbols
         text = re.sub(r'[^\w\s.,;:!?()\[\]{}\'"\-/]', ' ', text)
+        # Normalize whitespace again
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
     

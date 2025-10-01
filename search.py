@@ -2,6 +2,9 @@
 Flow 2: Similarity Search
 Run this script to search the vector database
 """
+from dotenv import load_dotenv
+load_dotenv()
+
 from config import Config
 from vectordb import VectorDatabase
 
@@ -23,7 +26,8 @@ def display_results(results, query):
         print(f"Source File: {result['metadata']['filename']}")
         print(f"Chunk: {result['metadata']['chunk_index'] + 1}/{result['metadata']['total_chunks']}")
         print(f"\nContent Preview:")
-        print(f"{result['content'][:500]}...")
+        content_preview = result['content'][:500]
+        print(f"{content_preview}{'...' if len(result['content']) > 500 else ''}")
         print(f"{'-'*80}")
 
 def main():
@@ -44,6 +48,7 @@ def main():
     print(f"\nDatabase Status:")
     print(f"  Total vectors: {stats['total_vectors']}")
     print(f"  Embedding dimension: {stats['dimension']}")
+    print(f"  Collection name: {stats['collection_name']}")
     
     if stats['total_vectors'] == 0:
         print("\nERROR: Database is empty!")
@@ -67,7 +72,7 @@ def main():
             continue
         
         # Perform similarity search
-        print("\nSearching...")
+        print("\nSearching with manual cosine similarity...")
         results = vector_db.similarity_search(query, top_k=config.TOP_K_RETRIEVAL)
         
         # Display results
