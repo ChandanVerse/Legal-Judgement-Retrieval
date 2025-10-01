@@ -1,0 +1,50 @@
+# FastAPI and server dependencies
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# PDF processing
+pdfplumber
+
+# Text processing and embeddings
+langchain
+sentence-transformers
+transformers
+torch
+tokenizers
+
+# Vector database - Pinecone
+pinecone-client
+
+# Google Generative AI
+google-generativeai
+
+# ML and NLP utilities
+numpy
+scipy
+scikit-learn
+
+# HTTP and async support
+httpx
+aiofiles
+asyncio-throttle
+
+# GPU Support (Optional - uncomment if you have CUDA)
+# For CUDA 11.8 support, use:
+# torch --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1 support, use:
+torch --index-url https://download.pytorch.org/whl/cu121
+
+# Data processing
+pandas
+pydantic
+
+# Logging and monitoring
+structlog
+
+# Development dependencies (optional)
+pytest
+pytest-asyncio
+black
+isort
