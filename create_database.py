@@ -54,6 +54,15 @@ def main():
     print(f"Embedding dimension: {stats['dimension']}")
     print(f"Collection name: {stats['collection_name']}")
     print(f"Database path: {config.CHROMA_DB_PATH}")
+
+    # Show section distribution
+    if stats.get('sections'):
+        print("\nSection Distribution:")
+        for section, count in sorted(stats['sections'].items(), key=lambda x: x[1], reverse=True):
+            display_name = config.SECTION_DISPLAY_NAMES.get(section, section)
+            percentage = (count / stats['total_vectors']) * 100
+            print(f"  {display_name:30s}: {count:5d} chunks ({percentage:.1f}%)")
+
     print("="*60)
 
 if __name__ == "__main__":

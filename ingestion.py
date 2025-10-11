@@ -3,16 +3,18 @@ PDF ingestion and text processing for legal judgments
 """
 import pdfplumber
 import re
-from typing import List
+from typing import List, Dict, Optional
 from pathlib import Path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
+from section_detector import SectionDetector, Section
 
 class JudgmentIngestor:
-    """Handles PDF ingestion and text processing"""
-    
+    """Handles PDF ingestion and text processing with section detection"""
+
     def __init__(self, config):
         self.config = config
+        self.section_detector = SectionDetector()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.CHUNK_SIZE,
             chunk_overlap=config.CHUNK_OVERLAP,
@@ -45,38 +47,103 @@ class JudgmentIngestor:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
     
+    def create_chunks_with_sections(self, text: str, filename: str) -> List[Document]:
+        """
+        Create chunks with section detection and enhanced metadata
+
+        This is the new section-aware chunking method
+        """
+        documents = []
+
+        # Detect sections in the document
+        sections = self.section_detector.detect_with_fallback(text)
+
+        print(f"  Detected {len(sections)} sections:")
+        section_stats = self.section_detector.get_section_stats(sections)
+        for section_type, count in section_stats.items():
+            print(f"    - {section_type}: {count}")
+
+        # Process each section separately
+        for section in sections:
+            section_content = self.section_detector.extract_section_content(text, section)
+
+            if not section_content.strip():
+                continue
+
+            # Split section into chunks if it's too large
+            section_chunks = self.text_splitter.split_text(section_content)
+
+            # Create documents with enhanced metadata
+            for i, chunk in enumerate(section_chunks):
+                if not chunk.strip():
+                    continue
+
+                metadata = {
+                    'filename': filename,
+                    'section': section.section_type,
+                    'section_confidence': round(section.confidence, 2),
+                    'section_header': section.header_text,
+                    'chunk_index': i,
+                    'total_chunks_in_section': len(section_chunks),
+                }
+
+                documents.append(Document(
+                    page_content=chunk,
+                    metadata=metadata
+                ))
+
+        return documents
+
     def create_chunks(self, text: str, filename: str) -> List[Document]:
-        """Create chunks with metadata"""
+        """
+        Legacy method for backward compatibility
+        Creates chunks WITHOUT section detection
+        """
         chunks = self.text_splitter.split_text(text)
         documents = []
-        
+
         for i, chunk in enumerate(chunks):
             if not chunk.strip():
                 continue
-            
+
             metadata = {
                 'filename': filename,
                 'chunk_index': i,
-                'total_chunks': len(chunks)
+                'total_chunks': len(chunks),
+                'section': 'general',  # Default section for legacy mode
             }
-            
+
             documents.append(Document(
                 page_content=chunk,
                 metadata=metadata
             ))
-        
+
         return documents
     
-    def process_pdf(self, pdf_path: str) -> List[Document]:
-        """Complete PDF processing pipeline"""
+    def process_pdf(self, pdf_path: str, use_section_detection: bool = True) -> List[Document]:
+        """
+        Complete PDF processing pipeline
+
+        Args:
+            pdf_path: Path to PDF file
+            use_section_detection: If True, uses section-aware chunking (recommended)
+
+        Returns:
+            List of Document objects with metadata
+        """
         print(f"Processing: {pdf_path}")
-        
+
         raw_text = self.extract_text_from_pdf(pdf_path)
         clean_text = self.preprocess_text(raw_text)
-        
+
         filename = Path(pdf_path).name
-        documents = self.create_chunks(clean_text, filename)
-        
+
+        # Use section-aware chunking by default
+        if use_section_detection:
+            documents = self.create_chunks_with_sections(clean_text, filename)
+        else:
+            documents = self.create_chunks(clean_text, filename)
+
         print(f"Created {len(documents)} chunks for {filename}")
         return documents
     

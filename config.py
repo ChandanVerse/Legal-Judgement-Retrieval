@@ -26,7 +26,36 @@ class Config:
     # Retrieval Configuration
     TOP_K_RETRIEVAL = 5
     SIMILARITY_THRESHOLD = 0.3  # Minimum cosine similarity score
-    
+
+    # Section Detection Configuration
+    ENABLE_SECTION_DETECTION = True  # Enable section-aware processing
+
+    # Supported legal document sections
+    LEGAL_SECTIONS = [
+        'facts',                    # Facts of the case
+        'grounds',                  # Issues/Grounds/Questions of law
+        'prayers',                  # Relief sought/Prayers
+        'arguments_petitioner',     # Petitioner's arguments
+        'arguments_respondent',     # Respondent's arguments
+        'ratio_decidendi',          # Legal reasoning/Ratio
+        'obiter_dicta',            # Obiter remarks
+        'judgment',                 # Final judgment/Order
+        'general',                  # Fallback for unclassified sections
+    ]
+
+    # Section display names for user interface
+    SECTION_DISPLAY_NAMES = {
+        'facts': 'Facts',
+        'grounds': 'Grounds/Issues',
+        'prayers': 'Prayers/Relief Sought',
+        'arguments_petitioner': 'Petitioner Arguments',
+        'arguments_respondent': 'Respondent Arguments',
+        'ratio_decidendi': 'Legal Reasoning (Ratio)',
+        'obiter_dicta': 'Observations (Obiter)',
+        'judgment': 'Judgment/Order',
+        'general': 'General/Other',
+    }
+
     @classmethod
     def setup_directories(cls):
         """Ensure all required directories exist"""

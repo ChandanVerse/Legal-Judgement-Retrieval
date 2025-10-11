@@ -171,13 +171,36 @@ class VectorDatabase:
         return similarities[:top_k]
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get collection statistics"""
+        """Get collection statistics including section breakdown"""
         count = self.collection.count()
+
+        # Get section statistics
+        section_stats = self.get_section_distribution()
+
         return {
             'total_vectors': count,
             'dimension': self.embedding_dim,
-            'collection_name': self.config.COLLECTION_NAME
+            'collection_name': self.config.COLLECTION_NAME,
+            'sections': section_stats
         }
+
+    def get_section_distribution(self) -> Dict[str, int]:
+        """Get distribution of documents across sections"""
+        try:
+            results = self.collection.get(include=["metadatas"])
+
+            if not results['metadatas']:
+                return {}
+
+            section_counts = {}
+            for metadata in results['metadatas']:
+                section = metadata.get('section', 'unknown')
+                section_counts[section] = section_counts.get(section, 0) + 1
+
+            return section_counts
+        except Exception as e:
+            print(f"Error getting section distribution: {e}")
+            return {}
     
     def reset_database(self):
         """Reset the entire database (use with caution)"""

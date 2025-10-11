@@ -7,7 +7,11 @@ sentence-transformers
 torch
 
 # Vector database
-pinecone
+chromadb
+
+# LLM
+google-generativeai
 
 # Utilities
 python-dotenv
+numpy
