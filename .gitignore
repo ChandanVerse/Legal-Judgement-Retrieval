@@ -1,5 +1,6 @@
 # PDF files
 judgments_pdf/
+test_pdf/
 
 # ChromaDB storage
 chroma_db/
