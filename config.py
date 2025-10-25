@@ -10,10 +10,12 @@ class Config:
     # Directory Paths
     BASE_DIR = Path(__file__).parent
     JUDGMENTS_DIR = BASE_DIR / "judgments_pdf"
-    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", str(BASE_DIR / "chroma_db"))
-    
-    # ChromaDB Configuration
-    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "legal-judgments")
+
+    # Vector Database Configuration (Pinecone)
+    COLLECTION_NAME = os.getenv("PINECONE_INDEX_NAME", "legal-judgments")
+
+    # Legacy ChromaDB path (kept for reference, no longer used)
+    # CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", str(BASE_DIR / "chroma_db"))
     
     # Embedding Model Configuration
     EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
@@ -60,4 +62,3 @@ class Config:
     def setup_directories(cls):
         """Ensure all required directories exist"""
         cls.JUDGMENTS_DIR.mkdir(parents=True, exist_ok=True)
-        Path(cls.CHROMA_DB_PATH).mkdir(parents=True, exist_ok=True)
