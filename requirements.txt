@@ -1,0 +1,39 @@
+# Legal Case Similarity RAG System - Requirements
+
+# PDF Processing
+pdfplumber>=0.10.0
+
+# Embeddings & Models
+sentence-transformers>=2.2.0
+# torch is installed separately: pip install torch --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.35.0,<4.50.0
+
+# Vector Database (choose one)
+pinecone-client>=3.0.0
+# qdrant-client>=1.7.0  # Alternative: uncomment if using Qdrant
+
+# LangChain (for text splitting utilities)
+langchain>=0.1.0
+langchain-text-splitters>=0.0.1
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# Numerical Computing
+numpy>=1.24.0
+
+# Utilities
+tqdm>=4.65.0
+
+# Optional: Redis for caching
+# redis>=5.0.0
+
+# API Server
+fastapi>=0.109.0
+uvicorn>=0.27.0
+google-genai>=1.0.0
+python-multipart>=0.0.6
+
+# Development & Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --legal-navy: #1a2744;
+  --legal-slate: #334155;
+  --legal-gold: #c9a227;
+  --legal-cream: #faf9f7;
+  --legal-parchment: #f5f3ef;
+}
+
+body {
+  color: var(--legal-slate);
+  background-color: var(--legal-cream);
+  min-height: 100vh;
+}
+
+/* Animations */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse-gold {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(201, 162, 39, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(201, 162, 39, 0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeSlideUp 0.3s ease-out forwards;
+}
+
+.animate-cursor {
+  animation: blink 1s infinite;
+}
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s infinite;
+}
+
+/* Custom scrollbar - Gold themed */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--legal-cream);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--legal-gold);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b8922d;
+}
+
+/* Markdown styling in messages */
+.prose pre {
+  background: var(--legal-navy);
+  color: #e2e8f0;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+.prose code {
+  background: var(--legal-parchment);
+  color: var(--legal-navy);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.prose a {
+  color: var(--legal-gold);
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  color: #b8922d;
+}
+
+.prose strong {
+  color: var(--legal-navy);
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  color: var(--legal-navy);
+}
+
+/* Focus styles */
+.focus-gold:focus {
+  outline: none;
+  ring: 2px solid var(--legal-gold);
+  ring-offset: 2px;
+}
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: '|';
+  animation: blink 1s infinite;
+  color: var(--legal-gold);
+  font-weight: bold;
+}

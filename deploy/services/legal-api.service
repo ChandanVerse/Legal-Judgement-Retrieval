@@ -1,0 +1,17 @@
+[Unit]
+Description=Legal Case Search API Server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Legal-Judgement-Retrieval
+EnvironmentFile=/home/ubuntu/Legal-Judgement-Retrieval/.env
+ExecStart=/home/ubuntu/Legal-Judgement-Retrieval/.venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
