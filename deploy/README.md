@@ -25,7 +25,7 @@ LOCAL (Your PC - RTX 4060)              AWS Cloud
                           │
          ┌────────────────┴────────────────┐
          │       External Services         │
-         │  - Pinecone (vectors)           │
+         │  - Endee (vectors)              │
          │  - Google Gemini API            │
          └─────────────────────────────────┘
 ```
@@ -200,7 +200,7 @@ sudo systemctl restart legal-frontend
 | **Total** | **$0 for 12 months** | **~$10-12/month** |
 
 External services:
-- Pinecone: Free tier (100K vectors) or paid
+- Endee: Self-hosted (free) or Endee Cloud
 - Google Gemini API: Pay per use (~$0.001/query)
 
 ## Troubleshooting
