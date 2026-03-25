@@ -1,12 +1,12 @@
-"""Clear all data from Pinecone and MongoDB."""
+"""Clear all data from Endee and MongoDB."""
 
-from pinecone_db import PineconeDB
+from endee_db import EndeeDB
 
 
 def main():
-    # Connect to Pinecone
-    pinecone = PineconeDB()
-    pinecone.connect()
+    # Connect to Endee
+    endee = EndeeDB()
+    endee.connect()
 
     # Try MongoDB (may fail if cluster is paused)
     mongo = None
@@ -20,10 +20,10 @@ def main():
         print(f"MongoDB: Connection failed ({type(e).__name__})")
         print("  (Cluster may be paused - check MongoDB Atlas)")
 
-    # Show Pinecone stats
-    pinecone_stats = pinecone.stats()
-    vector_count = pinecone_stats.total_vector_count
-    print(f"Pinecone vectors: {vector_count}")
+    # Show Endee stats
+    endee_stats = endee.stats()
+    vector_count = endee_stats.get("vector_count", 0) if isinstance(endee_stats, dict) else 0
+    print(f"Endee vectors: {vector_count}")
 
     if vector_count == 0 and case_count == 0:
         print("\nDatabases are already empty.")
@@ -39,8 +39,8 @@ def main():
     print("\nClearing databases...")
 
     if vector_count > 0:
-        pinecone.delete_all()
-        print(f"  Pinecone: {vector_count} vectors deleted")
+        endee.delete_all()
+        print(f"  Endee: {vector_count} vectors deleted")
 
     if mongo and case_count > 0:
         mongo.delete_all()

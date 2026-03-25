@@ -1,7 +1,7 @@
 """Search pipeline with AWS DynamoDB snippet retrieval"""
 from pathlib import Path
 from embedder import Embedder
-from pinecone_db import PineconeDB
+from endee_db import EndeeDB
 from aws_db import AWSStorage
 from ingest import extract_text, chunk_text
 
@@ -9,7 +9,7 @@ from ingest import extract_text, chunk_text
 class Searcher:
     def __init__(self):
         self.embedder = Embedder()  # sentence-transformers (fast GPU)
-        self.db = PineconeDB()
+        self.db = EndeeDB()
         self.db.connect()
         self.storage = AWSStorage()  # AWS DynamoDB for snippets
 

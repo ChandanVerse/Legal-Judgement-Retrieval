@@ -8,9 +8,8 @@ sentence-transformers>=2.2.0
 # torch is installed separately: pip install torch --index-url https://download.pytorch.org/whl/cpu
 transformers>=4.35.0,<4.50.0
 
-# Vector Database (choose one)
-pinecone-client>=3.0.0
-# qdrant-client>=1.7.0  # Alternative: uncomment if using Qdrant
+# Vector Database
+endee>=1.0.0
 
 # LangChain (for text splitting utilities)
 langchain>=0.1.0

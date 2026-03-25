@@ -12,7 +12,7 @@ from tqdm import tqdm
 import config
 from ingest import extract_text, chunk_text, case_id_from_path, hash_text
 from embedder import Embedder
-from pinecone_db import PineconeDB
+from endee_db import EndeeDB
 from aws_db import AWSStorage
 
 
@@ -25,8 +25,8 @@ def main():
     # Initialize components
     print("Initializing components...")
     embedder = Embedder()
-    pinecone = PineconeDB()
-    pinecone.connect()
+    endee = EndeeDB()
+    endee.connect()
     aws = AWSStorage()
 
     # Get PDFs
@@ -36,7 +36,7 @@ def main():
 
     if args.reset:
         print("Resetting databases...")
-        pinecone.delete_all()
+        endee.delete_all()
         aws.delete_all()
 
     # ============ PHASE 1: Extract & Store Full Text in AWS DynamoDB ============
@@ -58,12 +58,12 @@ def main():
             page_count=page_count
         )
 
-        pdf_data[cid] = {"text": text, "chunks": chunks, "filename": pdf_path.name}
+        pdf_data[cid] = {"chunks": chunks}
 
     print(f"   Stored {len(pdf_data)} cases in DynamoDB")
 
-    # ============ PHASE 2: Embed Chunks -> Pinecone ============
-    print(f"\n[PHASE 2] Embedding chunks -> Pinecone")
+    # ============ PHASE 2: Embed Chunks -> Endee ============
+    print(f"\n[PHASE 2] Embedding chunks -> Endee")
 
     all_chunks = []
     chunk_metadata = []  # [(cid, chunk), ...]
@@ -83,26 +83,26 @@ def main():
         embeddings = embedder.embed_batch(batch)
         all_embeddings.extend(embeddings)
 
-    # Prepare vectors for Pinecone
+    # Prepare vectors for Endee
     vectors = []
     for (cid, chunk), emb in zip(chunk_metadata, all_embeddings):
         vid = f"{cid}_{hash_text(chunk)}"
         vectors.append({
             "id": vid,
-            "values": emb,
-            "metadata": {"cid": cid}
+            "vector": emb,
+            "meta": {"cid": cid}
         })
 
-    # Upsert to Pinecone
-    pinecone.upsert(vectors)
-    print(f"   Stored {len(vectors)} vectors in Pinecone")
+    # Upsert to Endee
+    endee.upsert(vectors)
+    print(f"   Stored {len(vectors)} vectors in Endee")
 
     # ============ DONE ============
     print(f"\n{'='*50}")
     print(f"INGESTION COMPLETE")
     print(f"  PDFs processed: {len(pdfs)}")
     print(f"  Cases in DynamoDB: {aws.count()}")
-    print(f"  Vectors in Pinecone: {len(vectors)}")
+    print(f"  Vectors in Endee: {len(vectors)}")
     print(f"{'='*50}")
 
 

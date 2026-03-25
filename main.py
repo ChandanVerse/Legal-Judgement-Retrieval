@@ -8,7 +8,7 @@ import config
 def cmd_test(args):
     """Test system components"""
     from embedder import Embedder
-    from pinecone_db import PineconeDB
+    from endee_db import EndeeDB
 
     print("=" * 50)
     print(" LEGAL CASE SIMILARITY - SYSTEM TEST")
@@ -28,14 +28,14 @@ def cmd_test(args):
         print(f"  ERROR: {e}")
         all_passed = False
 
-    # Test Pinecone
-    print("\n[Pinecone]")
+    # Test Endee
+    print("\n[Endee]")
     try:
-        db = PineconeDB()
+        db = EndeeDB()
         db.connect()
         stats = db.stats()
-        print(f"  Index: {config.PINECONE_INDEX}")
-        print(f"  Vectors: {stats.total_vector_count}")
+        print(f"  Index: {config.ENDEE_INDEX}")
+        print(f"  Stats: {stats}")
     except Exception as e:
         print(f"  ERROR: {e}")
         all_passed = False

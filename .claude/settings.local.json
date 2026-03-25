@@ -62,7 +62,8 @@
       "Bash(curl:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "WebFetch(domain:docs.endee.io)"
     ],
     "deny": [],
     "ask": []

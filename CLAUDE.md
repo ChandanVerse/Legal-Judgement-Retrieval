@@ -9,13 +9,13 @@
 - Chunk-based PDF-to-PDF search for accurate similarity matching
 - **Embeddings:** sentence-transformers (GPU locally, CPU on EC2)
 - **Google Gemini** for chat with function calling
-- Storage: Pinecone (vectors) + MongoDB Atlas (full text + PDFs)
+- Storage: Endee (vectors) + MongoDB Atlas (full text + PDFs)
 - **Deployed on AWS EC2** (m7i-flex.large)
 
 ## Tech Stack
 
 - **Python 3.11** with CUDA (RTX 4060)
-- **Pinecone** - Vector database (768-dim embeddings)
+- **Endee** - Vector database (768-dim embeddings)
 - **MongoDB Atlas** - Full case text + GridFS for PDFs
 - **sentence-transformers** - nomic-ai/nomic-embed-text-v1.5 (GPU batched)
 - **Google Gemini** - Chat with function calling (gemini-1.5-flash)
@@ -29,7 +29,7 @@
 ├── api_server.py       # FastAPI backend with Gemini chat
 ├── config.py           # Central configuration
 ├── embedder.py         # sentence-transformers (GPU, fast)
-├── pinecone_db.py      # Pinecone client
+├── endee_db.py         # Endee vector DB client
 ├── mongo_db.py         # MongoDB + GridFS client
 ├── ingest.py           # Ingestion pipeline
 ├── search.py           # Search pipeline
@@ -90,7 +90,7 @@ cd frontend && npm install && npm run dev
 │                         ▼                                   │
 │               ┌─────────────────┐                          │
 │               │  Tool Calls     │                          │
-│               │  - search       │──► Pinecone + GPU        │
+│               │  - search       │──► Endee + GPU            │
 │               │  - get_case     │──► MongoDB               │
 │               └─────────────────┘                          │
 │                         │                                   │
@@ -99,15 +99,14 @@ cd frontend && npm install && npm run dev
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Pinecone Schema
+## Endee Vector Schema
 
 ```python
 {
     "id": "{case_id}_{hash12}",
-    "values": [768-dim embedding],
-    "metadata": {
+    "vector": [768-dim embedding],
+    "meta": {
         "cid": "Case_Name",    # Case identifier
-        "sec": "facts"         # Section label
     }
 }
 ```

@@ -5,7 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 import config
 from embedder import Embedder
-from pinecone_db import PineconeDB
+from endee_db import EndeeDB
 
 from aws_db import AWSStorage as StorageClient
 
@@ -44,12 +44,12 @@ def hash_text(text: str) -> str:
 
 
 class Ingester:
-    """Full ingestion pipeline using MongoDB + Pinecone"""
+    """Full ingestion pipeline using MongoDB + Endee"""
 
     def __init__(self):
         self.embedder = Embedder()
-        self.pinecone = PineconeDB()
-        self.pinecone.connect()
+        self.endee = EndeeDB()
+        self.endee.connect()
         self.mongo = StorageClient()
 
     def ingest_all(
@@ -61,7 +61,7 @@ class Ingester:
 
         if reset:
             print("Resetting databases...")
-            self.pinecone.delete_all()
+            self.endee.delete_all()
             self.mongo.delete_all()
 
         # ============ PHASE 1: EXTRACT & STORE IN MONGODB ============
@@ -90,8 +90,8 @@ class Ingester:
 
         print(f"   Stored {len(pdf_data)} cases in MongoDB")
 
-        # ============ PHASE 2: EMBED -> PINECONE ============
-        print(f"\n[PHASE 2] Embedding chunks -> Pinecone")
+        # ============ PHASE 2: EMBED -> ENDEE ============
+        print(f"\n[PHASE 2] Embedding chunks -> Endee")
 
         chunk_metadata = []  # [(cid, chunk), ...]
         for cid, data in pdf_data.items():
@@ -104,17 +104,17 @@ class Ingester:
         all_chunks = [chunk for _, chunk in chunk_metadata]
         all_embeddings = self.embedder.embed_batch(all_chunks)
 
-        # Upsert to Pinecone
+        # Upsert to Endee
         vectors = []
         for (cid, chunk), emb in zip(chunk_metadata, all_embeddings):
             vid = f"{cid}_{hash_text(chunk)}"
             vectors.append({
                 "id": vid,
-                "values": emb,
-                "metadata": {"cid": cid}
+                "vector": emb,
+                "meta": {"cid": cid}
             })
 
-        self.pinecone.upsert(vectors)
+        self.endee.upsert(vectors)
         print(f"   Stored {len(vectors)} vectors")
 
         print(f"\nIngestion complete: {len(chunk_metadata)} chunks from {len(pdfs)} PDFs")

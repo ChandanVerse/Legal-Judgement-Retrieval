@@ -15,9 +15,10 @@ TEST_DIR = DATA_DIR / "test_case"
 # Embedding (sentence-transformers with CUDA)
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 
-# Pinecone
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX = "legal-rag"
+# Endee Vector Database
+ENDEE_URL = os.getenv("ENDEE_URL", "http://localhost:8080/api/v1")
+ENDEE_AUTH_TOKEN = os.getenv("ENDEE_AUTH_TOKEN")
+ENDEE_INDEX = "legal_rag"
 EMBEDDING_DIM = 768
 
 # MongoDB Atlas (local development)

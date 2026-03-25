@@ -9,7 +9,7 @@ def test_imports():
     try:
         import config
         from embedder import Embedder
-        from pinecone_db import PineconeDB
+        from endee_db import EndeeDB
         from ingest import extract_text, chunk_text, case_id_from_path, hash_text, Ingester
         from search import Searcher
         print("    OK - All modules imported successfully")
@@ -25,8 +25,8 @@ def test_config():
     import config
 
     errors = []
-    if not config.PINECONE_API_KEY:
-        errors.append("PINECONE_API_KEY not set")
+    if not config.ENDEE_URL:
+        errors.append("ENDEE_URL not set")
     if not config.DATASET_DIR.exists():
         errors.append(f"Dataset dir not found: {config.DATASET_DIR}")
 
@@ -35,7 +35,7 @@ def test_config():
             print(f"    FAIL - {e}")
         return False
 
-    print(f"    OK - Pinecone API key: {config.PINECONE_API_KEY[:10]}...")
+    print(f"    OK - Endee URL: {config.ENDEE_URL}")
     print(f"    OK - Dataset dir: {config.DATASET_DIR}")
     print(f"    OK - Embedding model: {config.EMBEDDING_MODEL}")
     return True
@@ -99,42 +99,42 @@ def test_embedder_batch():
         return False
 
 
-def test_pinecone_connection():
-    """Test Pinecone connection"""
-    print("\n[6] Testing Pinecone connection...")
-    from pinecone_db import PineconeDB
+def test_endee_connection():
+    """Test Endee connection"""
+    print("\n[6] Testing Endee connection...")
+    from endee_db import EndeeDB
     import config
 
     try:
-        db = PineconeDB()
+        db = EndeeDB()
         db.connect()
         stats = db.stats()
-        print(f"    OK - Connected to index: {config.PINECONE_INDEX}")
-        print(f"    OK - Current vectors: {stats.total_vector_count}")
+        print(f"    OK - Connected to index: {config.ENDEE_INDEX}")
+        print(f"    OK - Stats: {stats}")
         return True
     except Exception as e:
-        print(f"    FAIL - Pinecone error: {e}")
+        print(f"    FAIL - Endee error: {e}")
         return False
 
 
-def test_pinecone_operations():
-    """Test Pinecone upsert/search/delete"""
-    print("\n[7] Testing Pinecone operations...")
-    from pinecone_db import PineconeDB
+def test_endee_operations():
+    """Test Endee upsert/search/delete"""
+    print("\n[7] Testing Endee operations...")
+    from endee_db import EndeeDB
     from embedder import Embedder
 
-    db = PineconeDB()
+    db = EndeeDB()
     db.connect()
     embedder = Embedder()
 
     # Test upsert
     test_id = "test_vector_12345"
     try:
-        emb = embedder.embed("Test document for Pinecone operations")
+        emb = embedder.embed("Test document for Endee operations")
         db.upsert([{
             "id": test_id,
-            "values": emb,
-            "metadata": {"cid": "test_case"}
+            "vector": emb,
+            "meta": {"cid": "test_case"}
         }])
         print("    OK - Upsert successful")
     except Exception as e:
@@ -156,7 +156,7 @@ def test_pinecone_operations():
 
     # Cleanup
     try:
-        db.index.delete(ids=[test_id])
+        db.index.delete_vector(test_id)
         print("    OK - Cleanup successful")
     except Exception as e:
         print(f"    WARN - Cleanup failed: {e}")
@@ -202,8 +202,8 @@ def main():
         ("CUDA", test_cuda),
         ("Embedder", test_embedder),
         ("Batch Embedding", test_embedder_batch),
-        ("Pinecone Connection", test_pinecone_connection),
-        ("Pinecone Operations", test_pinecone_operations),
+        ("Endee Connection", test_endee_connection),
+        ("Endee Operations", test_endee_operations),
         ("PDF Extraction", test_pdf_extraction),
     ]
 
